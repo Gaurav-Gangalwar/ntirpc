@@ -615,7 +615,7 @@ svc_rqst_unhook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 						&rec->xprt.xp_flags,
 						SVC_XPRT_FLAG_ADDED_SEND);
 				close(rec->xprt.xp_fd_send);
-				rec->xprt.xp_fd_send = -1;
+				rec->xprt.xp_fd_send = RPC_ANYFD;
 			}
 		}
 		break;
@@ -644,6 +644,10 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 	tracepoint(xprt, rearm, __func__, __LINE__, xprt, ev_flags);
 #endif /* USE_LTTNG_NTIRPC */
 
+	if (xprt->xp_flags & (ev_flags | SVC_XPRT_FLAG_DESTROYED)) {
+		return (0);
+	}
+
 	__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
 		"%s: xprt %p fd %d ev_flags%s%s%s%s%s%s%s%s%s",
 		__func__, xprt, xprt->xp_fd,
@@ -657,9 +661,6 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 		ev_flags & SVC_XPRT_FLAG_UREG        ? " UREG" : "",
 		sr_rec->ev_flags & SVC_RQST_FLAG_SHUTDOWN
 					? "sr_rec->ev_flags SHUTDOWN" : "");
-
-	if (xprt->xp_flags & (ev_flags | SVC_XPRT_FLAG_DESTROYED))
-		return (0);
 
 	/* MUST follow the destroyed check above */
 	if (sr_rec->ev_flags & SVC_RQST_FLAG_SHUTDOWN)
@@ -700,7 +701,6 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 					sr_rec, sr_rec->id_k, sr_rec->ev_refcnt,
 					sr_rec->ev_u.epoll.epoll_fd,
 					sr_rec->sv[0], sr_rec->sv[1], code);
-				SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 			} else {
 				__warnx(TIRPC_DEBUG_FLAG_SVC_RQST |
 					TIRPC_DEBUG_FLAG_REFCNT,
@@ -740,7 +740,6 @@ svc_rqst_rearm_events_locked(SVCXPRT *xprt, uint16_t ev_flags)
 					sr_rec, sr_rec->id_k, sr_rec->ev_refcnt,
 					sr_rec->ev_u.epoll.epoll_fd,
 					sr_rec->sv[0], sr_rec->sv[1], code);
-				SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 			} else {
 				__warnx(TIRPC_DEBUG_FLAG_SVC_RQST |
 					TIRPC_DEBUG_FLAG_REFCNT,
@@ -774,10 +773,16 @@ svc_rqst_hook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 		     uint16_t ev_flags)
 {
 	int code = EINVAL;
+	SVCXPRT *xprt = &rec->xprt;
 
 #ifdef USE_LTTNG_NTIRPC
 	tracepoint(xprt, hook, __func__, __LINE__, &rec->xprt, ev_flags);
 #endif /* USE_LTTNG_NTIRPC */
+
+	if (xprt->xp_flags & (ev_flags | SVC_XPRT_FLAG_DESTROYED)) {
+		return (0);
+	}
+
 
 	__warnx(TIRPC_DEBUG_FLAG_SVC_RQST,
 		"%s: xprt %p fd %d ev_flags%s%s%s%s%s%s%s%s%s",
@@ -792,6 +797,10 @@ svc_rqst_hook_events(struct rpc_dplx_rec *rec, struct svc_rqst_rec *sr_rec,
 		ev_flags & SVC_XPRT_FLAG_UREG        ? " UREG" : "",
 		sr_rec->ev_flags & SVC_RQST_FLAG_SHUTDOWN
 					? "sr_rec->ev_flags SHUTDOWN" : "");
+
+	/* MUST follow the destroyed check above */
+	if (sr_rec->ev_flags & SVC_RQST_FLAG_SHUTDOWN)
+		return (0);
 
 	/* assuming success */
 	atomic_set_uint16_t_bits(&rec->xprt.xp_flags, ev_flags);
@@ -979,10 +988,10 @@ svc_rqst_evchan_write(SVCXPRT *xprt, struct xdr_ioq *xioq, bool has_blocked)
 #if defined(TIRPC_EPOLL)
 	if (sr_rec->ev_type == SVC_EVENT_EPOLL) {
 		/* For send we need to dup the xprt fd */
-		if (xprt->xp_fd_send == -1) {
+		if (xprt->xp_fd_send == RPC_ANYFD) {
 			xprt->xp_fd_send = dup(xprt->xp_fd);
 
-			if (xprt->xp_fd_send< 0) {
+			if (xprt->xp_fd_send < 0) {
 				code = errno;
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s: failed duplicating fd (%d)",
@@ -1273,9 +1282,9 @@ svc_rqst_xprt_task_send(struct work_pool_entry *wpe)
 		 * xp_refcnt need more than 1 (this task).
 		 */
 		svc_ioq_write(&rec->xprt);
+	} else {
+		SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
 	}
-
-	SVC_RELEASE(&rec->xprt, SVC_RELEASE_FLAG_NONE);
 }
 
 /*

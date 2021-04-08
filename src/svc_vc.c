@@ -551,6 +551,8 @@ svc_vc_destroy_task(struct work_pool_entry *wpe)
 			"%s: fd %d closed",
 			 __func__, rec->xprt.xp_fd);
 		rec->xprt.xp_fd = RPC_ANYFD;
+		if (rec->xprt.xp_fd_send != RPC_ANYFD)
+			(void)close(rec->xprt.xp_fd_send);
 	}
 
 	if (rec->xprt.xp_ops->xp_free_user_data)

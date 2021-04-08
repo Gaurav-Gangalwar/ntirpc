@@ -324,6 +324,12 @@ void svc_ioq_write(SVCXPRT *xprt)
 	have = TAILQ_FIRST(&rec->writeq.qh);
 	mutex_unlock(&rec->writeq.qmutex);
 
+	/* Take ref for queue processing */
+	SVC_REF(xprt, SVC_REF_FLAG_NONE);
+
+	/* Release the ref taken for send queue */
+	SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
+
 	while (have != NULL) {
 		int rc = 0;
 
@@ -392,14 +398,10 @@ void svc_ioq_write(SVCXPRT *xprt)
 			/* Fetch the next request */
 			have = TAILQ_FIRST(&rec->writeq.qh);
 			mutex_unlock(&rec->writeq.qmutex);
-
-			__warnx(TIRPC_DEBUG_FLAG_SVC_VC,
-				"%s: %p fd %d About to release",
-				__func__, xprt, xprt->xp_fd);
-			SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 			XDR_DESTROY(xioq->xdrs);
 		}
 	}
+	SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
 }
 
 static void
@@ -416,15 +418,16 @@ svc_ioq_write_now(SVCXPRT *xprt, struct xdr_ioq *xioq)
 	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
 	bool was_empty;
 
-	SVC_REF(xprt, SVC_REF_FLAG_NONE);
-
 #ifdef USE_LTTNG_NTIRPC
 	tracepoint(xprt, mutex, __func__, __LINE__, &rec->xprt);
 #endif /* USE_LTTNG_NTIRPC */
 	mutex_lock(&rec->writeq.qmutex);
 
 	was_empty = TAILQ_FIRST(&rec->writeq.qh) == NULL;
-
+	/* Take ref for send queue.
+	 * There should be already ref if queue is not empty */
+	if (was_empty)
+		SVC_REF(xprt, SVC_REF_FLAG_NONE);
 	/* always queue output requests on the duplex record's writeq */
 	TAILQ_INSERT_TAIL(&rec->writeq.qh, &(xioq->ioq_s), q);
 
@@ -452,14 +455,16 @@ svc_ioq_write_submit(SVCXPRT *xprt, struct xdr_ioq *xioq)
 	struct rpc_dplx_rec *rec = REC_XPRT(xprt);
 	bool was_empty;
 
-	SVC_REF(xprt, SVC_REF_FLAG_NONE);
-
 #ifdef USE_LTTNG_NTIRPC
 	tracepoint(xprt, mutex, __func__, __LINE__, &xprt);
 #endif /* USE_LTTNG_NTIRPC */
 	mutex_lock(&rec->writeq.qmutex);
 
 	was_empty = TAILQ_FIRST(&rec->writeq.qh) == NULL;
+	/* Take ref for send queue.
+	 * There should be already ref if queue is not empty */
+	if (was_empty)
+		SVC_REF(xprt, SVC_REF_FLAG_NONE);
 
 	/* always queue output requests on the duplex record's writeq */
 	TAILQ_INSERT_TAIL(&rec->writeq.qh, &(xioq->ioq_s), q);
