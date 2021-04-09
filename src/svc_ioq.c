@@ -324,12 +324,6 @@ void svc_ioq_write(SVCXPRT *xprt)
 	have = TAILQ_FIRST(&rec->writeq.qh);
 	mutex_unlock(&rec->writeq.qmutex);
 
-	/* Take ref for queue processing */
-	SVC_REF(xprt, SVC_REF_FLAG_NONE);
-
-	/* Release the ref taken for send queue */
-	SVC_RELEASE(xprt, SVC_RELEASE_FLAG_NONE);
-
 	while (have != NULL) {
 		int rc = 0;
 
