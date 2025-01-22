@@ -263,6 +263,19 @@ chunk_ref_locked(struct poolq_entry *have)
 	return atomic_inc_uint32_t(&io_buf->refs);
 }
 
+static bool
+is_rpc_buf(struct poolq_head *ioqh, RDMAXPRT *rdma_xprt)
+{
+
+	if ((ioqh == &rdma_xprt->inbufs_hdr.uvqh) ||
+	    (ioqh == &rdma_xprt->outbufs_hdr.uvqh) ||
+	    (ioqh == &rdma_xprt->inbufs_data.uvqh) ||
+	    (ioqh == &rdma_xprt->outbufs_data.uvqh))
+		return true;
+	return false;
+
+}
+
 static struct poolq_head *
 get_data_poolq_head(struct rpc_io_bufs *io_buf, RDMAXPRT *rdma_xprt)
 {
@@ -455,7 +468,7 @@ xdr_rdma_ioq_uv_fetch(struct xdr_ioq *xioq, struct poolq_head *ioqh,
 			ioqh, ioqh->qcount, have);
 		if (have) {
 			TAILQ_REMOVE(&ioqh->qh, have, q);
-			if (ioqh != &rdma_xprt->cbqh)
+			if (is_rpc_buf(ioqh, rdma_xprt))
 				chunk_ref_locked(have);
 
 			/* added directly to the queue.
@@ -491,7 +504,14 @@ xdr_rdma_ioq_uv_fetch(struct xdr_ioq *xioq, struct poolq_head *ioqh,
 				}
 
 				if (unlikely(ioqh == &rdma_xprt->cbqh)) {
-					__warnx(TIRPC_DEBUG_FLAG_EVENT, "cbc buffers exhausetd rdma_xprt %p "
+					__warnx(TIRPC_DEBUG_FLAG_EVENT,
+						"cbc buffers exhausted rdma_xprt %p "
+						"ioqh %p qcount %d", rdma_xprt, ioqh, ioqh->qcount);
+					rpc_rdma_allocate_cbc_locked(ioqh);
+				}
+				if (unlikely(ioqh == &rdma_xprt->pd->srqh)) {
+					__warnx(TIRPC_DEBUG_FLAG_EVENT,
+						"srq cbc buffers exhausted rdma_xprt %p "
 						"ioqh %p qcount %d", rdma_xprt, ioqh, ioqh->qcount);
 					rpc_rdma_allocate_cbc_locked(ioqh);
 				}
@@ -543,7 +563,7 @@ xdr_rdma_ioq_uv_recycle_io_buf(struct poolq_head *ioqh,
 		TAILQ_INSERT_TAIL(&ioqh->qh, have, q);
 	ioqh->qcount++;
 
-	if (ioqh != &rdma_xprt->cbqh)
+	if (is_rpc_buf(ioqh, rdma_xprt))
 		chunk_unref_locked(have);
 
 	pthread_mutex_unlock(&ioqh->qmutex);

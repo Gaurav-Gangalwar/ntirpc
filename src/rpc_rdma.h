@@ -160,7 +160,7 @@ struct rpc_rdma_pd {
 #define MAX_CQ_SIZE(xa) (2 * MAX_QP_WR(xa))
 #define MAX_CBC_OUTSTANDING(xa) (xa)->credits
 /* Keep enough cbcs to avoid on demand allocation */
-#define MAX_CBC_ALLOCATION(xa) (MAX_CBC_OUTSTANDING(xa) * 3)
+#define MAX_CBC_ALLOCATION(xa) MAX_CBC_OUTSTANDING(xa)
 #define MAX_RECV_OUTSTANDING(xa) MAX_CBC_OUTSTANDING(xa)
 
 /**

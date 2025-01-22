@@ -897,9 +897,18 @@ xdr_rdma_callq(RDMAXPRT *rdma_xprt)
 	 * rdma_xprt->xa->rq_depth + rdma_xprt->xa->sq_depth, rdma_xprt->xa->credits);
 	 * Remove from cbqh and add to sm_dr.ioq */
 
-	struct poolq_entry *have =
-		xdr_rdma_ioq_uv_fetch(&rdma_xprt->sm_dr.ioq, &rdma_xprt->cbqh,
-				      "callq context", 1, IOQ_FLAG_NONE);
+	struct poolq_entry *have;
+
+	if (rdma_xprt->pd->srq) {
+		have =
+		    xdr_rdma_ioq_uv_fetch(&rdma_xprt->sm_dr.ioq, &rdma_xprt->pd->srqh,
+		    "callq context", 1, IOQ_FLAG_NONE);
+	} else {
+		have =
+		    xdr_rdma_ioq_uv_fetch(&rdma_xprt->sm_dr.ioq, &rdma_xprt->cbqh,
+		    "callq context", 1, IOQ_FLAG_NONE);
+	}
+
 	struct rpc_rdma_cbc *cbc = (struct rpc_rdma_cbc *)(_IOQ(have));
 
 	cbc->recvq.xdrs[0].x_lib[1] =

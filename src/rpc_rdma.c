@@ -254,6 +254,8 @@ rpc_rdma_pd_put(RDMAXPRT *rdma_xprt)
 	}
 
 	if (atomic_dec_uint32_t(&rdma_xprt->pd->pd_used) == 0) {
+		__warnx(TIRPC_DEBUG_FLAG_EVENT, "xprt %p destroy pd %p",
+		    rdma_xprt, rdma_xprt->pd);
 		mutex_lock(&rpc_rdma_state.lock);
 		LIST_REMOVE(rdma_xprt->pd, pdl);
 		mutex_unlock(&rpc_rdma_state.lock);
@@ -274,14 +276,21 @@ rpc_rdma_pd_put(RDMAXPRT *rdma_xprt)
 	rdma_xprt->pd = NULL;
 }
 
+struct ibv_device_attr device_attr;
+
 /**
  * rpc_rdma_print_devinfo: Dump the device details
  */
 void
-rpc_rdma_print_devinfo(RDMAXPRT *rdma_xprt)
+rpc_rdma_print_devinfo(struct ibv_device *device)
 {
-	struct ibv_device_attr device_attr;
-	ibv_query_device(rdma_xprt->cm_id->verbs, &device_attr);
+	struct ibv_context *ctx = ibv_open_device(device);
+	if (!ctx) {
+		__warnx(TIRPC_DEBUG_FLAG_ERROR,
+		    "Failed to open device");
+		return;
+	}
+	ibv_query_device(ctx, &device_attr);
 	uint64_t node_guid = be64toh(device_attr.node_guid);
 	__warnx(TIRPC_DEBUG_FLAG_EVENT, "Device Info:\n"
 		"\tNode Guid:\t\t\t%04x:%04x:%04x:%04x\n"
@@ -321,6 +330,17 @@ rpc_rdma_print_devinfo(RDMAXPRT *rdma_xprt)
 		device_attr.max_srq,
 		device_attr.max_srq_wr,
 		device_attr.max_srq_sge);
+}
+
+void
+rpc_rdma_print_devinfos()
+{
+	int num_dev = 0;
+	struct ibv_device **dev_list = NULL;
+	dev_list = ibv_get_device_list(&num_dev);
+	for (int i = 0; i < num_dev; i++) {
+		rpc_rdma_print_devinfo(dev_list[i]);
+	}
 }
 
 static void
@@ -930,10 +950,12 @@ rpc_rdma_cq_event_handler(RDMAXPRT *rdma_xprt)
 				}
 
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
-					"%s() cq completion status: %s (%d) rdma_xprt state %x opcode %d cbc %p "
-					"inline %d",
+					"%s() cq completion status: %s (%d) rdma_xprt %p "
+					"state %x qp %p pd %p srq %p opcode %d cbc %p inline %d",
 					__func__, ibv_wc_status_str(wc[i].status), wc[i].status,
-					rdma_xprt->state, wc[i].opcode, cbc, cbc->call_inline);
+					rdma_xprt, rdma_xprt->state, rdma_xprt->qp,
+					rdma_xprt->pd->pd, rdma_xprt->srq, wc[i].opcode, cbc,
+					cbc->call_inline);
 
 				cbc->call_inline = 1;
 
@@ -1743,6 +1765,8 @@ rpc_rdma_ncreatef(const struct rpc_rdma_attr *xa,
 		"%s() NFS/RDMA engine bound recvsz %llu sendsz %llu rdma_xprt %p",
 		__func__, rdma_xprt->sm_dr.recvsz, rdma_xprt->sm_dr.sendsz, rdma_xprt);
 
+	rpc_rdma_print_devinfos();
+
 	return (&rdma_xprt->sm_dr.xprt);
 
 failure:
@@ -1871,8 +1895,6 @@ rpc_rdma_setup_stuff(RDMAXPRT *rdma_xprt)
 		return rc;
 	}
 
-	rpc_rdma_print_devinfo(rdma_xprt);
-
 	__warnx(TIRPC_DEBUG_FLAG_RPC_RDMA,
 		"%s() %p[%u] created qp %p handle %u qp_num %u",
 		__func__, rdma_xprt, rdma_xprt->state, rdma_xprt->qp,
@@ -1925,7 +1947,7 @@ static int
 rpc_rdma_setup_cbq(RDMAXPRT *rdma_xprt,
     struct poolq_head *ioqh, u_int depth, u_int sge)
 {
-	if (ioqh->qsize) {
+	if (ioqh->qcount) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
 			"%s() contexts already allocated",
 			__func__);
@@ -2051,6 +2073,8 @@ rpc_rdma_bind_server(RDMAXPRT *rdma_xprt)
 				rpc_rdma_state.cm_epollfd);
 }
 
+extern struct ibv_device_attr device_attr;
+
 /**
  * rpc_rdma_clone: clone child from listener parent
  *
@@ -2088,38 +2112,54 @@ rpc_rdma_clone(RDMAXPRT *l_rdma_xprt, struct rdma_cm_id *cm_id)
 	}
 
 	if (l_rdma_xprt->xa->use_srq) {
+		/* To avoid race amon multiple connect threads */
+		mutex_lock(&rpc_rdma_state.lock);
 		if (!rdma_xprt->pd->srq) {
 			struct ibv_srq_init_attr srq_attr = {
-				.attr.max_wr = rdma_xprt->xa->rq_depth,
-				.attr.max_sge = rdma_xprt->xa->max_recv_sge,
+				.attr.max_wr = device_attr.max_srq_wr,
+				.attr.max_sge = device_attr.max_srq_sge,
 			};
+
 			rdma_xprt->pd->srq =
 				ibv_create_srq(rdma_xprt->pd->pd, &srq_attr);
+
 			if (!rdma_xprt->pd->srq) {
 				rc = errno;
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s() ibv_create_srq failed: %s (%d)",
 					__func__, strerror(rc), rc);
+				mutex_unlock(&rpc_rdma_state.lock);
 				goto failure;
 			}
+
+			__warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: xprt %p srq %p pd %p",
+			    __func__, rdma_xprt, rdma_xprt->pd->srq, rdma_xprt->pd->pd);
 		}
 
 		if (!rdma_xprt->pd->srqh.qcount) {
 			rc = rpc_rdma_setup_cbq(rdma_xprt, &rdma_xprt->pd->srqh,
-						rdma_xprt->xa->rq_depth,
-						rdma_xprt->xa->max_recv_sge);
+						MAX_CBC_ALLOCATION(rdma_xprt->xa),
+						device_attr.max_srq_sge);
 			if (rc) {
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s:%u ERROR (return)",
 					__func__, __LINE__);
+				mutex_unlock(&rpc_rdma_state.lock);
 				goto failure;
 			}
+
+			 __warnx(TIRPC_DEBUG_FLAG_EVENT, "%s: xprt %p srqh %p qcount %d pd %p",
+			    __func__, rdma_xprt, &rdma_xprt->pd->srqh, rdma_xprt->pd->srqh.qcount,
+			    rdma_xprt->pd->pd);
 		}
 
 		/* only send contexts */
 		rc = rpc_rdma_setup_cbq(rdma_xprt, &rdma_xprt->cbqh,
-					rdma_xprt->xa->sq_depth,
-					rdma_xprt->xa->credits);
+					MAX_CBC_ALLOCATION(rdma_xprt->xa),
+					device_attr.max_sge);
+
+		mutex_unlock(&rpc_rdma_state.lock);
+
 		if (rc) {
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
 				"%s:%u ERROR (return)",
@@ -2129,7 +2169,7 @@ rpc_rdma_clone(RDMAXPRT *l_rdma_xprt, struct rdma_cm_id *cm_id)
 	} else {
 		rc = rpc_rdma_setup_cbq(rdma_xprt, &rdma_xprt->cbqh,
 					MAX_CBC_ALLOCATION(rdma_xprt->xa),
-					rdma_xprt->xa->credits);
+					device_attr.max_sge);
 		if (rc) {
 			__warnx(TIRPC_DEBUG_FLAG_ERROR,
 				"%s:%u ERROR (return)",
