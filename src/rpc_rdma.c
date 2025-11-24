@@ -1191,6 +1191,9 @@ rpc_rdma_cq_thread(void *arg)
 			mutex_unlock(&rdma_xprt->cm_lock);
 		}
 	}
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() thread %p exiting, run_count = %d",
+		__func__, pthread_self(), atomic_fetch_int32_t(&rpc_rdma_state.run_count));
 	rcu_unregister_thread();
 	pthread_exit(NULL);
 }
@@ -1263,8 +1266,9 @@ rpc_rdma_cm_event_handler(RDMAXPRT *ep_rdma_xprt, struct rdma_cm_event *event)
 				__warnx(TIRPC_DEBUG_FLAG_ERROR,
 					"%s:%u ERROR (return)",
 					__func__, __LINE__);
+			} else {
+				rpc_rdma_stats_add(rdma_xprt);
 			}
-			rpc_rdma_stats_add(rdma_xprt);
 		}
 		break;
 
@@ -1273,7 +1277,16 @@ rpc_rdma_cm_event_handler(RDMAXPRT *ep_rdma_xprt, struct rdma_cm_event *event)
 			"%s() %p CONNECT_REQUEST",
 			__func__, rdma_xprt);
 		rpc_rdma_state.c_r.id_queue[0] = cm_id;
-		svc_rdma_rendezvous(&rdma_xprt->sm_dr.xprt);
+		enum xprt_stat rendezvous_status = svc_rdma_rendezvous(&rdma_xprt->sm_dr.xprt);
+		if (rendezvous_status == XPRT_DIED || rendezvous_status == XPRT_DESTROYED) {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s() %p CONNECT_REQUEST rendezvous failed with status %d, "
+				"cleaning up connection attempt",
+				__func__, rdma_xprt, rendezvous_status);
+			/* Clean up the connection attempt */
+			rdma_reject(cm_id, NULL, 0);
+			rc = ECONNREFUSED;
+		}
 
 		break;
 
@@ -1417,6 +1430,9 @@ rpc_rdma_cm_thread(void *nullarg)
 				SVC_DESTROY(&rdma_xprt_event->sm_dr.xprt);
 		}
 	}
+	__warnx(TIRPC_DEBUG_FLAG_EVENT,
+		"%s() thread %p exiting, run_count = %d",
+		__func__, pthread_self(), atomic_fetch_int32_t(&rpc_rdma_state.run_count));
 	rcu_unregister_thread();
 	pthread_exit(NULL);
 }
