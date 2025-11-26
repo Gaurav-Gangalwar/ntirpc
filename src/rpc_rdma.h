@@ -87,6 +87,7 @@ typedef int (*rpc_rdma_callback_t)(struct rpc_rdma_cbc *cbc, RDMAXPRT *rdma_xprt
 #define CBC_FLAG_NONE		0x0000
 #define CBC_FLAG_RELEASE	0x0001
 #define CBC_FLAG_RELEASING	0x0002
+#define CBC_FLAG_CLIENT		0x0004	/**< Client-side callback (from clnt_rdma_call) */
 
 #define RDMA_CB_TIMEOUT_SEC 10
 
@@ -162,6 +163,7 @@ struct rpc_rdma_pd {
 /* Keep enough cbcs to avoid on demand allocation */
 #define MAX_CBC_ALLOCATION(xa) (MAX_CBC_OUTSTANDING(xa) * 3)
 #define MAX_RECV_OUTSTANDING(xa) MAX_CBC_OUTSTANDING(xa)
+#define MAX_RDMA_CALLBACKS 64	/**< Maximum active client RDMA callbacks per connection */
 
 /**
  * \struct rpc_rdma_xprt
@@ -206,6 +208,7 @@ struct rpc_rdma_xprt {
 	u_int io_bufs_count;
 
 	uint32_t active_requests;
+	uint32_t active_client_callbacks;	/**< Active client RDMA callbacks (from clnt_rdma_call) */
 
 	struct poolq_head cbclist;
 
@@ -328,6 +331,11 @@ static inline void cbc_release_it(struct rpc_rdma_cbc *cbc)
 
 		TAILQ_REMOVE(&rdma_xprt->cbclist.qh, &cbc->cbc_list, q);
 		rdma_xprt->cbclist.qcount--;
+
+		/* Decrement active_client_callbacks if this was a client callback */
+		if (cbc->cbc_flags & CBC_FLAG_CLIENT) {
+			atomic_dec_uint32_t(&rdma_xprt->active_client_callbacks);
+		}
 
 		pthread_mutex_unlock(&rdma_xprt->cbclist.qmutex);
 
