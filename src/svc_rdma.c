@@ -235,7 +235,10 @@ svc_rdma_decode(struct svc_req *req)
 	}
 
 	if (req->rq_msg.rm_direction == REPLY) {
+		RDMAXPRT *rdma_xprt = (RDMAXPRT *)req->rq_xprt;
 		/* reply header (xprt OK) */
+		/* Decrement active_client_callbacks if this was a client callback */
+		atomic_dec_uint32_t(&rdma_xprt->active_client_callbacks);
 		clnt_req_process_reply(req->rq_xprt, req);
 		return XPRT_IDLE;
 	}

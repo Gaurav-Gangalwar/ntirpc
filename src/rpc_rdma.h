@@ -332,11 +332,6 @@ static inline void cbc_release_it(struct rpc_rdma_cbc *cbc)
 		TAILQ_REMOVE(&rdma_xprt->cbclist.qh, &cbc->cbc_list, q);
 		rdma_xprt->cbclist.qcount--;
 
-		/* Decrement active_client_callbacks if this was a client callback */
-		if (cbc->cbc_flags & CBC_FLAG_CLIENT) {
-			atomic_dec_uint32_t(&rdma_xprt->active_client_callbacks);
-		}
-
 		pthread_mutex_unlock(&rdma_xprt->cbclist.qmutex);
 
 		if (cbc->non_registered_buf) {
