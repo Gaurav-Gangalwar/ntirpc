@@ -1582,6 +1582,9 @@ xdr_rdma_svc_recv(struct rpc_rdma_cbc *cbc, u_int32_t xid)
 	cmsg = m_(cbc->call_head);
 	rpcrdma_dump_msg(cbc->call_uv, "call", cmsg->rdma_xid);
 
+	/* Update client credits from incoming message */
+	rdma_xprt->client_credits = ntohl(cmsg->rdma_credit);
+
 	switch (ntohl(cmsg->rdma_vers)) {
 	case RPCRDMA_VERSION:
 		break;

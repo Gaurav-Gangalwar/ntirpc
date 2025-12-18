@@ -264,9 +264,11 @@ int main(int argc, char *argv[])
 	int prog = 100003; /* nfs */
 	int vers = 3; /* allow raw, rdma, tcp, udp by default */
 	int proc = 0;
+#ifdef USE_RPC_RDMA
 	int send_sz = 8192;
 	int recv_sz = 8192;
 	int page_sz = sysconf(_SC_PAGESIZE);
+#endif
 	unsigned int failures = 0;
 	unsigned int timeouts = 0;
 	bool rpcbind = false;

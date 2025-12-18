@@ -1820,6 +1820,7 @@ rpc_rdma_allocate(const struct rpc_rdma_attr *xa)
 	rdma_xprt->sm_dr.ioq.xdrs[0].x_lib[1] = rdma_xprt;
 	rdma_xprt->active_requests = 0;
 	rdma_xprt->active_client_callbacks = 0;
+	rdma_xprt->client_credits = xa->credits;
 
 	rc = mutex_init(&rdma_xprt->cm_lock, NULL);
 	if (rc) {

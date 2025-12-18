@@ -235,11 +235,12 @@ clnt_rdma_call(struct clnt_req *cc)
 	/* Check if adding this callback would exceed MAX_RDMA_CALLBACKS
 	 * before allocating any resources to avoid cleanup overhead */
 	uint32_t active_callbacks = atomic_fetch_uint32_t(&rdma_xprt->active_client_callbacks);
-	if (active_callbacks >= MAX_RDMA_CALLBACKS) {
+	uint32_t max_rdma_callbacks = MAX_RDMA_CALLBACKS(rdma_xprt);
+	if (active_callbacks >= max_rdma_callbacks) {
 		__warnx(TIRPC_DEBUG_FLAG_ERROR,
-		    "%s: active_client_callbacks %u >= MAX_RDMA_CALLBACKS %u, "
+		    "%s: active_client_callbacks %u >= max_rdma_callbacks %u, "
 		    "cannot post new RDMA callback",
-		    __func__, active_callbacks, MAX_RDMA_CALLBACKS);
+		    __func__, active_callbacks, max_rdma_callbacks);
 		cl->cl_error.re_errno = EAGAIN;
 		return (RPC_CANTSEND);
 	}
@@ -301,6 +302,8 @@ clnt_rdma_call(struct clnt_req *cc)
 		__warnx(TIRPC_DEBUG_FLAG_CLNT_RDMA,
 			"%s: %p@%p failed",
 			__func__, cl, cx->cx_rec);
+		/* Decrement active_client_callbacks on error */
+		atomic_dec_uint32_t(&rdma_xprt->active_client_callbacks);
 		cbc_release_it(cbc);
 		return (RPC_CANTENCODEARGS);
 	}
@@ -308,6 +311,8 @@ clnt_rdma_call(struct clnt_req *cc)
 
 	/* send request and recv response */
 	if (!xdr_rdma_clnt_flushout(cbc)) {
+		/* Decrement active_client_callbacks on error */
+		atomic_dec_uint32_t(&rdma_xprt->active_client_callbacks);
 		cbc_release_it(cbc);
 		cl->cl_error.re_errno = errno;
 		return (RPC_CANTSEND);
