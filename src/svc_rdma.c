@@ -238,7 +238,15 @@ svc_rdma_decode(struct svc_req *req)
 		RDMAXPRT *rdma_xprt = (RDMAXPRT *)req->rq_xprt;
 		/* reply header (xprt OK) */
 		/* Decrement active_client_callbacks if this was a client callback */
-		atomic_dec_uint32_t(&rdma_xprt->active_client_callbacks);
+		uint32_t active = atomic_fetch_uint32_t(&rdma_xprt->active_client_callbacks);
+		if (active > 0) {
+			atomic_dec_uint32_t(&rdma_xprt->active_client_callbacks);
+		} else {
+			__warnx(TIRPC_DEBUG_FLAG_ERROR,
+				"%s: active_client_callbacks already 0, skipping decrement "
+				"to prevent underflow, xprt %p",
+				__func__, req->rq_xprt);
+		}
 		clnt_req_process_reply(req->rq_xprt, req);
 		return XPRT_IDLE;
 	}

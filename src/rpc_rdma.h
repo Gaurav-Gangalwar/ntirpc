@@ -163,7 +163,12 @@ struct rpc_rdma_pd {
 /* Keep enough cbcs to avoid on demand allocation */
 #define MAX_CBC_ALLOCATION(xa) (MAX_CBC_OUTSTANDING(xa) * 3)
 #define MAX_RECV_OUTSTANDING(xa) MAX_CBC_OUTSTANDING(xa)
-#define MAX_RDMA_CALLBACKS 64	/**< Maximum active client RDMA callbacks per connection */
+/**< Maximum active client RDMA callbacks per connection.
+ * Use min of client_credits and xa->credits if both are > 0, else xa->credits */
+#define MAX_RDMA_CALLBACKS(rdma_xprt) \
+	(((rdma_xprt)->client_credits > 0 && (rdma_xprt)->xa->credits > 0) ? \
+	 MIN((rdma_xprt)->client_credits, (rdma_xprt)->xa->credits) : \
+	 (rdma_xprt)->xa->credits)
 
 /**
  * \struct rpc_rdma_xprt
@@ -209,6 +214,7 @@ struct rpc_rdma_xprt {
 
 	uint32_t active_requests;
 	uint32_t active_client_callbacks;	/**< Active client RDMA callbacks (from clnt_rdma_call) */
+	uint32_t client_credits;		/**< Client credits from rdma_credit in incoming messages */
 
 	struct poolq_head cbclist;
 
