@@ -1,8 +1,9 @@
 # New TI-RPC  Cmake
 
-# Current version as of Fedora 16.  Not tested with earlier.
+# Current version as of Fedora 25.  Not tested with earlier.
+#  cmake 4.x wants 3.6 or better.
 
-cmake_minimum_required(VERSION 3.5.0)
+cmake_minimum_required(VERSION 3.6.2)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules/")
 
@@ -236,14 +237,6 @@ set(SYSTEM_LIBRARIES
   ${KRB5_LIBRARIES}
   ${SYSTEM_LIBRARIES}
 )
-
-if (NOT BSDBASED)
-  find_package(NSL) # sockets
-  set(SYSTEM_LIBRARIES
-    ${SYSTEM_LIBRARIES}
-    ${NSL_LIBRARY}
-  )
-endif (NOT BSDBASED)
 
 set(LIBNTIRPC_MAP "${PROJECT_BINARY_DIR}/src/libntirpc.map")
 # subst files (need add_custom_command for dependency, fyi)
